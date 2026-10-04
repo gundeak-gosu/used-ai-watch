@@ -70,8 +70,15 @@ def _thumb(a):
 def search(keyword, region_slug):
     params = [("in", region_slug), ("q", keyword), ("only_on_sale", "true"),
               ("_data", "routes/kr.search.buy-sell._index")]
-    data = get_json(f"{BASE}/kr/search/buy-sell/?" + urllib.parse.urlencode(params))
+    url = f"{BASE}/kr/search/buy-sell/?" + urllib.parse.urlencode(params)
+    data = get_json(url)
     arts = data.get("buySellArticles") or ((data.get("allPage") or {}).get("fleamarketArticles")) or []
+    if not arts:
+        # 당근은 요청이 몰리면 오류 대신 '빈 결과'를 줄 때가 있어 잠시 쉬었다가 한 번 더
+        time.sleep(20)
+        data = get_json(url)
+        arts = data.get("buySellArticles") or ((data.get("allPage") or {}).get("fleamarketArticles")) or []
+        print(f"  당근 {region_slug} '{keyword}': 빈 결과 → 재시도 {len(arts)}건")
     # 검색 결과에 먼 지역 글도 섞여 오므로 '내 동네 + 당근이 알려주는 인근 동네'만 남김(직거래용)
     near = {r.get("name") for r in [data.get("searchRegion") or {}] + (data.get("nearbyRegions") or [])} - {None}
     if near:
