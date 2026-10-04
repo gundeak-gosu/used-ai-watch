@@ -1,0 +1,44 @@
+name: 중고 AI 알리미
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 30분마다 (GitHub 사정상 몇 분~수십 분 늦을 수 있음)
+  workflow_dispatch:
+    inputs:
+      mail_test_to:
+        description: "메일 설정 확인용 — 테스트 메일 받을 주소 (평소엔 비워두고 실행)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: used-ai-watch
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests pyyaml
+      - name: 테스트 메일
+        if: ${{ github.event.inputs.mail_test_to != '' && github.event.inputs.mail_test_to != null }}
+        run: python bot.py mailtest "${{ github.event.inputs.mail_test_to }}"
+      - name: 프로젝트별 매물 확인
+        if: ${{ github.event.inputs.mail_test_to == '' || github.event.inputs.mail_test_to == null }}
+        run: python bot.py

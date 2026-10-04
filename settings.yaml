@@ -1,0 +1,19 @@
+# ===== 중고 AI 알리미 — 서비스 전체 설정 (관리자용) =====
+# 프로젝트(감시할 물건)는 웹사이트에서 각자 만들고 마감합니다. 이 파일은 공통 설정만.
+
+sources:            # 검색할 사이트 (끄려면 false). 당근은 프로젝트에 동네를 적은 경우에만 검색
+  daangn: true
+  bunjang: true
+  joongna: true
+  naver_flea: true
+
+ai_model: "claude-haiku-4-5-20251001"   # 더 정확하게: "claude-sonnet-5-5" (비용 약 3배)
+price_weight: 0.4          # 점수 = 적합도 60% + 가격가치 40%
+daily_summary_hour: 21     # 매일 21시쯤 프로젝트별 TOP3 비교 메일 (끄려면 이 줄 삭제)
+request_delay_sec: 3       # 사이트 요청 사이 쉬는 시간(초). 줄이지 마세요.
+first_run_ai_max: 120      # 새 프로젝트 첫 회차에 AI가 평가할 최대 매물 수
+ai_max_per_run: 30         # 이후 회차마다 프로젝트당 최대 평가 수
+run_budget_min: 20         # 한 회차 최대 실행 시간(분) — 넘으면 나머지 프로젝트는 다음 회차로
+
+# 모든 프로젝트에 공통으로 적용할 제외어 (AI에 보내기 전에 걸러서 비용 절약)
+default_exclude: ["삽니다", "구합니다", "구매합니다", "매입"]

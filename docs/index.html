@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>중고 AI 알리미</title>
+<meta name="description" content="당근·번개장터·중고나라·N플리마켓 매물을 AI가 읽고 나에게 맞는 순서로 비교해 메일로 알려드려요.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f7f8; --card: #fff; --text: #1a1a1a; --muted: #6b6f76; --line: #e6e7ea;
+    --accent: #ff6f0f; --accent-weak: #fff1e7; --danger: #e5484d; --ok: #12a150;
+    --radius: 14px; --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111214; --card: #1b1c1f; --text: #ececee; --muted: #9a9ea6; --line: #2b2d31;
+            --accent-weak: #3a2414; --shadow: none; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+         font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .logo { font-weight: 800; font-size: 19px; letter-spacing: -.3px; }
+  .logo span { color: var(--accent); }
+  .who { color: var(--muted); font-size: 13px; display: flex; gap: 10px; align-items: center; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px; }
+  h1 { font-size: 26px; letter-spacing: -.5px; margin: 8px 0 6px; }
+  h2 { font-size: 18px; margin: 0 0 4px; letter-spacing: -.3px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  label { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 6px; }
+  label small { font-weight: 400; color: var(--muted); }
+  input, textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+                    background: var(--bg); color: var(--text); font: inherit; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  textarea { min-height: 120px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row label { margin-top: 14px; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 11px 16px; cursor: pointer; }
+  .btn { background: var(--accent); color: #fff; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-ghost { background: transparent; color: var(--muted); padding: 6px 8px; font-weight: 500; }
+  .btn-line { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); padding: 7px 12px; font-size: 13px; }
+  .full { width: 100%; margin-top: 18px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tabs button { background: transparent; color: var(--muted); padding: 8px 12px; }
+  .tabs button.on { background: var(--accent-weak); color: var(--accent); }
+  .msg { margin-top: 12px; font-size: 14px; padding: 10px 12px; border-radius: 10px; display: none; }
+  .msg.err { display: block; background: #fdecec; color: var(--danger); }
+  .msg.ok { display: block; background: #e8f7ee; color: var(--ok); }
+  @media (prefers-color-scheme: dark) { .msg.err { background: #3a1517; } .msg.ok { background: #102a1b; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip { background: var(--accent-weak); color: var(--accent); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; }
+  .chip.gray { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+  .meta { color: var(--muted); font-size: 13px; }
+  .phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .items { margin-top: 14px; border-top: 1px solid var(--line); }
+  .item { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; padding: 12px 0;
+          border-bottom: 1px solid var(--line); text-decoration: none; color: inherit; align-items: center; }
+  .item:last-child { border-bottom: 0; }
+  .item img, .item .noimg { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: var(--bg); }
+  .item .t { font-weight: 700; font-size: 14px; }
+  .item .d { font-size: 13px; color: var(--muted); }
+  .score { font-weight: 800; font-size: 18px; color: var(--accent); text-align: right; }
+  .score small { display: block; font-size: 11px; color: var(--muted); font-weight: 500; }
+  .empty { text-align: center; color: var(--muted); padding: 28px 0 12px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+  .step { background: var(--bg); border-radius: 12px; padding: 12px; font-size: 13px; color: var(--muted); }
+  .step b { display: block; color: var(--text); font-size: 14px; margin-bottom: 2px; }
+  .hidden { display: none !important; }
+  @media (max-width: 560px) { .row, .steps { grid-template-columns: 1fr; } h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🛒 중고 <span>AI</span> 알리미</div>
+    <div class="who hidden" id="who"><span id="whoEmail"></span><button class="btn-ghost" id="logout">로그아웃</button></div>
+  </header>
+
+  <!-- 로그인 -->
+  <section id="authView" class="hidden">
+    <div class="card">
+      <h1>원하는 중고 물건,<br>AI가 대신 찾아 비교해 드려요</h1>
+      <p class="sub">당근·번개장터·중고나라·N플리마켓 매물을 30분마다 모아 AI가 본문까지 읽고, 내 조건에 맞는 순서로 점수를 매겨 메일로 알려드려요.</p>
+      <div class="steps">
+        <div class="step"><b>1. 프로젝트 만들기</b>찾는 물건·키워드·원하는 조건 입력</div>
+        <div class="step"><b>2. 메일로 알림</b>좋은 매물이 TOP3에 들면 바로, 매일 저녁 비교표</div>
+        <div class="step"><b>3. 마감</b>샀으면 마감 — 프로젝트가 삭제돼요</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="tabs"><button class="on" data-mode="login">로그인</button><button data-mode="signup">회원가입</button></div>
+      <form id="authForm">
+        <label>이메일 <small>(알림을 받을 주소)</small></label>
+        <input type="email" id="email" required autocomplete="email">
+        <label>비밀번호 <small>(6자 이상)</small></label>
+        <input type="password" id="pw" required minlength="6" autocomplete="current-password">
+        <button class="btn full" id="authBtn" type="submit">로그인</button>
+        <div class="msg" id="authMsg"></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- 내 프로젝트 -->
+  <section id="appView" class="hidden">
+    <div class="phead" style="align-items:center;margin:4px 0 12px">
+      <h2>내 프로젝트 <span class="meta" id="count"></span></h2>
+      <button class="btn" id="newBtn">+ 새 프로젝트</button>
+    </div>
+
+    <div class="card hidden" id="formCard">
+      <h2>새 프로젝트</h2>
+      <p class="sub">자세히 쓸수록 AI 비교가 정확해져요. 첫 결과는 보통 30분~1시간 안에 메일로 와요.</p>
+      <form id="pForm">
+        <label>프로젝트 이름</label>
+        <input id="fName" maxlength="40" required placeholder="예: 골프 드라이버">
+        <label>검색 키워드 <small>(쉼표로 구분, 최대 5개 — 모든 키워드 결과를 모아 비교해요)</small></label>
+        <input id="fKw" required placeholder="예: 골프 드라이버, 드라이버 헤드, 캘러웨이 드라이버">
+        <label>원하는 조건 <small>(평소 말하듯 자세히)</small></label>
+        <textarea id="fWant" required minlength="5" maxlength="2000" placeholder="예: 구력 2년 차, 평균 95타. 슬라이스가 고민이라 관용성 높은 헤드. 로프트 10.5도, 샤프트 R 또는 SR. 2021년 이후 모델, 정품. 헤드만 판매는 제외. 예산 50만원 이하."></textarea>
+        <div class="row">
+          <div><label>최소 가격(원)</label><input id="fMin" type="number" min="0" step="1000" value="0"></div>
+          <div><label>최대 가격(원)</label><input id="fMax" type="number" min="1000" step="1000" required placeholder="500000"></div>
+        </div>
+        <label>당근 동네 <small>(선택, 쉼표로 최대 3개 — 비우면 당근은 빼고 전국 사이트만)</small></label>
+        <input id="fRg" placeholder="예: 강남구 역삼동, 강남구 논현동">
+        <label>제외할 단어 <small>(선택, 쉼표로 구분 — 제목·본문에 있으면 제외)</small></label>
+        <input id="fEx" placeholder="예: 헤드커버만, 아이언, 유틸">
+        <label>알림 기준 점수 <small>(이 점수 이상 새 매물만 즉시 알림, 기본 65)</small></label>
+        <input id="fScore" type="number" min="0" max="100" value="65">
+        <div class="row">
+          <button type="button" class="btn-line full" id="cancelBtn">취소</button>
+          <button class="btn full" id="saveBtn" type="submit">만들기</button>
+        </div>
+        <div class="msg" id="formMsg"></div>
+      </form>
+    </div>
+
+    <div id="list"></div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://hkjuvgbugqyglmkrmpyc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_BJEzyscoFAVreQOdqjqWug_1QWtcMPf";  // 공개용 키(RLS로 보호됨)
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const won = (n) => Number(n || 0).toLocaleString("ko-KR") + "원";
+const split = (s) => s.split(",").map(x => x.trim()).filter(Boolean);
+function msg(el, text, kind) { el.textContent = text; el.className = "msg " + (text ? kind : ""); }
+function ago(t) {
+  if (!t) return null;
+  const m = Math.round((Date.now() - new Date(t)) / 60000);
+  return m < 1 ? "방금" : m < 60 ? m + "분 전" : m < 1440 ? Math.round(m / 60) + "시간 전" : Math.round(m / 1440) + "일 전";
+}
+const KO_ERR = {
+  "Invalid login credentials": "이메일 또는 비밀번호가 맞지 않아요.",
+  "Email not confirmed": "메일함의 가입 확인 링크를 먼저 눌러주세요.",
+  "User already registered": "이미 가입된 이메일이에요. 로그인해 주세요.",
+};
+const ko = (e) => KO_ERR[e?.message] || e?.message || "오류가 났어요. 잠시 후 다시 시도해 주세요.";
+
+// ---------- 로그인 ----------
+let mode = "login";
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  $("authBtn").textContent = mode === "login" ? "로그인" : "회원가입";
+  $("pw").autocomplete = mode === "login" ? "current-password" : "new-password";
+  msg($("authMsg"), "");
+});
+$("authForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $("email").value.trim(), password = $("pw").value;
+  $("authBtn").disabled = true; msg($("authMsg"), "");
+  try {
+    if (mode === "signup") {
+      const { data, error } = await sb.auth.signUp({ email, password,
+        options: { emailRedirectTo: location.origin + location.pathname } });
+      if (error) throw error;
+      if (!data.session) msg($("authMsg"), "가입 확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.", "ok");
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    }
+  } catch (err) { msg($("authMsg"), ko(err), "err"); }
+  $("authBtn").disabled = false;
+};
+$("logout").onclick = () => sb.auth.signOut();
+
+sb.auth.onAuthStateChange((_ev, session) => render(session));
+
+function render(session) {
+  $("authView").classList.toggle("hidden", !!session);
+  $("appView").classList.toggle("hidden", !session);
+  $("who").classList.toggle("hidden", !session);
+  if (session) { $("whoEmail").textContent = session.user.email; load(); }
+}
+
+// ---------- 프로젝트 ----------
+$("newBtn").onclick = () => { $("formCard").classList.remove("hidden"); $("fName").focus(); };
+$("cancelBtn").onclick = () => { $("formCard").classList.add("hidden"); msg($("formMsg"), ""); };
+
+$("pForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const keywords = split($("fKw").value), regions = split($("fRg").value), exclude = split($("fEx").value);
+  const min_price = Number($("fMin").value || 0), max_price = Number($("fMax").value);
+  if (keywords.length < 1 || keywords.length > 5) return msg($("formMsg"), "키워드는 1~5개로 적어주세요.", "err");
+  if (regions.length > 3) return msg($("formMsg"), "당근 동네는 3개까지예요.", "err");
+  if (min_price > max_price) return msg($("formMsg"), "최소 가격이 최대 가격보다 커요.", "err");
+  $("saveBtn").disabled = true;
+  const { error } = await sb.from("projects").insert({
+    name: $("fName").value.trim(), keywords, want: $("fWant").value.trim(), regions, exclude,
+    min_price, max_price, min_score: Number($("fScore").value || 65) });
+  $("saveBtn").disabled = false;
+  if (error) return msg($("formMsg"), ko(error), "err");
+  $("pForm").reset(); $("fMin").value = 0; $("fScore").value = 65;
+  $("formCard").classList.add("hidden");
+  load();
+};
+
+async function load() {
+  const { data, error } = await sb.from("projects")
+    .select("id,name,keywords,want,regions,exclude,min_price,max_price,min_score,notify_email,created_at,last_run_at,status_note,top")
+    .order("created_at", { ascending: false });
+  if (error) { $("list").innerHTML = `<div class="card msg err" style="display:block">${esc(ko(error))}</div>`; return; }
+  $("count").textContent = data.length ? `${data.length}/5` : "";
+  if (!data.length) {
+    $("list").innerHTML = `<div class="card empty">아직 프로젝트가 없어요.<br>
+      <b>+ 새 프로젝트</b>로 찾고 싶은 물건을 등록해 보세요.</div>`;
+    return;
+  }
+  $("list").innerHTML = data.map(p => {
+    const top = p.top || [];
+    const status = p.last_run_at
+      ? `마지막 확인 ${ago(p.last_run_at)} · ${esc(p.status_note || "")}`
+      : "⏳ 첫 분석 대기 중 — 보통 30분~1시간 안에 결과 메일이 와요";
+    const items = top.length ? `<div class="items">${top.map((it, i) => `
+        <a class="item" href="${esc(it.url)}" target="_blank" rel="noopener">
+          ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : `<div class="noimg"></div>`}
+          <div><div class="t">${i + 1}위 · ${esc(it.model || "")} · ${won(it.price)}</div>
+            <div class="d">[${esc(it.src)}] ${esc(it.specs || "")}</div>
+            <div class="d">👍 ${esc(it.summary || "")}${it.cons ? ` · ⚠️ ${esc(it.cons)}` : ""}</div></div>
+          <div class="score">${it.score}<small>적합 ${it.fit} · 가치 ${it.value}</small></div>
+        </a>`).join("")}</div>`
+      : (p.last_run_at ? `<div class="empty">아직 조건에 맞는 매물이 없어요. 새로 올라오면 메일로 알려드릴게요.</div>` : "");
+    return `<div class="card">
+      <div class="phead">
+        <div><h2>${esc(p.name)}</h2>
+          <div class="meta">${won(p.min_price)} ~ ${won(p.max_price)} · 알림 ${p.min_score}점 이상 · ${esc(p.notify_email)}</div></div>
+        <button class="btn-danger" data-close="${p.id}" data-name="${esc(p.name)}">마감</button>
+      </div>
+      <div class="chips">${p.keywords.map(k => `<span class="chip">${esc(k)}</span>`).join("")}
+        ${(p.regions || []).map(r => `<span class="chip gray">📍 ${esc(r)}</span>`).join("")}</div>
+      <div class="note">${status}</div>
+      ${items}
+    </div>`;
+  }).join("");
+  document.querySelectorAll("[data-close]").forEach(b => b.onclick = async () => {
+    if (!confirm(`'${b.dataset.name}' 프로젝트를 마감할까요?\n알림이 멈추고 프로젝트와 기록이 삭제돼요.`)) return;
+    b.disabled = true;
+    const { error } = await sb.from("projects").delete().eq("id", b.dataset.close);
+    if (error) { alert(ko(error)); b.disabled = false; } else load();
+  });
+}
+
+sb.auth.getSession().then(({ data }) => render(data.session));
+</script>
+</body>
+</html>
