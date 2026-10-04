@@ -8,6 +8,10 @@ on:
       mail_test_to:
         description: "메일 설정 확인용 — 테스트 메일 받을 주소 (평소엔 비워두고 실행)"
         required: false
+      daangn_test:
+        description: "당근 검색 점검만 하기(브라우저/일반 요청 비교)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,10 +39,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests pyyaml beautifulsoup4
+      - run: pip install requests pyyaml beautifulsoup4 playwright
+      - name: 브라우저 설치(당근 검색용)
+        run: python -m playwright install --with-deps chromium
       - name: 테스트 메일
         if: ${{ github.event.inputs.mail_test_to != '' && github.event.inputs.mail_test_to != null }}
         run: python bot.py mailtest "${{ github.event.inputs.mail_test_to }}"
+      - name: 당근 검색 점검
+        if: ${{ github.event.inputs.daangn_test == 'true' }}
+        run: python daangn_check.py
       - name: 프로젝트별 매물 확인
-        if: ${{ github.event.inputs.mail_test_to == '' || github.event.inputs.mail_test_to == null }}
+        if: ${{ (github.event.inputs.mail_test_to == '' || github.event.inputs.mail_test_to == null) && github.event.inputs.daangn_test != 'true' }}
         run: python bot.py

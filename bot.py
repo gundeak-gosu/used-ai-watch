@@ -296,6 +296,37 @@ SOURCE_DEFAULTS = {
     "naver_flea": True,
 }
 
+def daangn_fetch(kw, rg, ctx):
+    """당근: PC 수집기(daangn_agent.py)가 올린 결과가 최근 것이면 그걸 쓰고, 아니면 직접 검색.
+    직접 검색이 0건이면(클라우드 서버 차단) 수집기의 마지막 결과(3일 이내)로 대신함."""
+    from datetime import datetime as _dt, timezone as _tz
+    c = (ctx.get("daangn_cache") or {}).get((rg, kw))
+    age_min = None
+    if c:
+        age_min = (_dt.now(_tz.utc) - _dt.fromisoformat(c["fetched_at"].replace("Z", "+00:00"))).total_seconds() / 60
+        if age_min <= 90 and c["articles"]:
+            print(f"  당근 {rg}/{kw}: PC 수집 결과 사용({int(age_min)}분 전) {len(c['articles'])}건")
+            return [dict(a) for a in c["articles"]]
+    slug = resolve_region(rg, ctx["region_cache"])
+    got = []
+    try:  # 1순위: 실제 브라우저(쿠키 있는 상태)로 검색
+        if "dg_browser" not in ctx:
+            from daangn_browser import DaangnBrowser
+            ctx["dg_browser"] = DaangnBrowser()
+        got = ctx["dg_browser"].search(kw, slug)
+        print(f"  당근 {rg}/{kw}: 브라우저 검색 {len(got)}건")
+    except Exception as e:
+        print(f"  당근 {rg}/{kw}: 브라우저 검색 실패({str(e)[:80]}) → 일반 요청")
+    if not got:
+        try:
+            got = search(kw, slug)
+        except Blocked:
+            got = []
+    if not got and c and c["articles"]:
+        print(f"  당근 {rg}/{kw}: 직접 검색 0건 → PC 수집 결과 사용({int(age_min)}분 전) {len(c['articles'])}건")
+        return [dict(a) for a in c["articles"]]
+    return got
+
 def collect(cfg, w, ctx):
     """프로젝트가 고른 사이트들을 검색. 한 사이트가 실패해도 나머지는 계속.
     같은 회차에 여러 프로젝트가 같은 검색을 하면 ctx['cache']에서 재사용(사이트 부담·시간 절약).
@@ -316,7 +347,7 @@ def collect(cfg, w, ctx):
             continue
         if kind == "daangn":
             for rg in w.get("regions") or []:
-                jobs.append((sid, rg, lambda kw, rg=rg: search(kw, resolve_region(rg, ctx["region_cache"]))))
+                jobs.append((sid, rg, lambda kw, rg=rg: daangn_fetch(kw, rg, ctx)))
         elif kind == "bunjang":
             jobs.append((sid, "", bunjang_search))
         elif kind == "joongna":
@@ -662,8 +693,21 @@ def run():
     # 오래 안 돈 프로젝트부터(시간 초과 시에도 공평하게)
     projects.sort(key=lambda p: p.get("last_run_at") or "")
     print(f"진행 중인 프로젝트 {len(projects)}개")
-    ctx = {"region_cache": {}, "cache": {}, "detail": {}}
+    ctx = {"region_cache": {}, "cache": {}, "detail": {}, "daangn_cache": {}}
+    try:
+        for c in sb_rpc("bot_daangn_get") or []:
+            ctx["daangn_cache"][(c["region"], c["keyword"])] = c
+        print(f"PC 당근 수집 결과 {len(ctx['daangn_cache'])}건 불러옴")
+    except Exception as e:
+        print("PC 당근 수집 결과 불러오기 실패:", e)
     budget = time.time() + cfg.get("run_budget_min", 20) * 60
+    try:
+        _run_projects(cfg, projects, ctx, now, budget)
+    finally:
+        if ctx.get("dg_browser"):
+            ctx["dg_browser"].close()
+
+def _run_projects(cfg, projects, ctx, now, budget):
     for p in projects:
         if time.time() > budget:
             print("⏱ 시간 예산 초과 — 나머지는 다음 회차에")
