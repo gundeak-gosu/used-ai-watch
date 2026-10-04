@@ -2,7 +2,7 @@ name: 중고 AI 알리미
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # 30분마다 (GitHub 사정상 몇 분~수십 분 늦을 수 있음)
+    - cron: "7,37 * * * *"   # 30분마다(매시 7분·37분 — 정각·30분은 GitHub이 붐벼 지연이 잦음)
   workflow_dispatch:
     inputs:
       mail_test_to:
