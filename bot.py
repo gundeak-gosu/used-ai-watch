@@ -7,6 +7,7 @@ from email.message import EmailMessage
 from html import escape as esc
 from datetime import datetime, timezone, timedelta
 import requests, yaml
+import generic
 
 BASE = "https://www.daangn.com"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -289,9 +290,10 @@ SOURCE_DEFAULTS = {
 }
 
 def collect(cfg, w, ctx):
-    """사이트별로 검색. 한 사이트가 실패해도 나머지는 계속.
-    같은 회차에 여러 프로젝트가 같은 검색을 하면 ctx['cache']에서 재사용(사이트 부담·시간 절약)."""
-    srcs = cfg.get("sources", {})
+    """프로젝트가 고른 사이트들을 검색. 한 사이트가 실패해도 나머지는 계속.
+    같은 회차에 여러 프로젝트가 같은 검색을 하면 ctx['cache']에서 재사용(사이트 부담·시간 절약).
+    반환: (매물 목록, 사이트별 결과 {site_id: 건수 또는 오류 문구})"""
+    off = {k for k, v in (cfg.get("sources") or {}).items() if v is False}
     kws = w["keywords"]
     delay = cfg.get("request_delay_sec", 3)
     items, keys = [], set()
@@ -300,39 +302,44 @@ def collect(cfg, w, ctx):
             k = re.sub(r"\W", "", it["title"].lower())[:30] + str(it["price"])  # 사이트 간 중복글 제거
             if it["id"] not in keys and k not in keys:
                 keys.update((it["id"], k)); items.append(it)
-    jobs = []
-    if srcs.get("daangn", True):
-        for rg in w.get("regions") or []:
-            jobs.append(("당근", rg, lambda kw, rg=rg: search(kw, resolve_region(rg, ctx["region_cache"]))))
-    if srcs.get("bunjang", True):
-        jobs.append(("번개장터", "", bunjang_search))
-    if srcs.get("joongna", True):
-        d = SOURCE_DEFAULTS["joongna"]
-        jobs.append(("중고나라", "", lambda kw: nextjs_search("중고나라", d["search_url"], d["item_url"], kw, "jn")))
-    if srcs.get("naver_flea", True):
-        jobs.append(("N플리마켓", "", naver_flea_search))
-    counts, problems = {}, []
-    for label, rg, fn in jobs:
+    jobs = []  # (site_id, 캐시키 보조, 검색함수)
+    for sd in w.get("site_defs") or []:
+        sid, kind = sd["id"], sd["kind"]
+        if kind in off:
+            continue
+        if kind == "daangn":
+            for rg in w.get("regions") or []:
+                jobs.append((sid, rg, lambda kw, rg=rg: search(kw, resolve_region(rg, ctx["region_cache"]))))
+        elif kind == "bunjang":
+            jobs.append((sid, "", bunjang_search))
+        elif kind == "joongna":
+            d = SOURCE_DEFAULTS["joongna"]
+            jobs.append((sid, "", lambda kw, d=d: nextjs_search("중고나라", d["search_url"], d["item_url"], kw, "jn")))
+        elif kind == "naver_flea":
+            jobs.append((sid, "", naver_flea_search))
+        elif kind == "generic" and sd.get("search_url"):
+            jobs.append((sid, "", lambda kw, sd=sd: generic.search(sd["id"], sd["name"], sd["search_url"], kw)))
+    stats = {}
+    for sid, rg, fn in jobs:
         try:
             for kw in kws:
-                ck = (label, rg, kw)
+                ck = (sid, rg, kw)
                 if ck not in ctx["cache"]:
                     ctx["cache"][ck] = fn(kw)
                     time.sleep(delay)
                 got = ctx["cache"][ck]
-                counts[label] = counts.get(label, 0) + len(got)
+                stats[sid] = (stats[sid] if isinstance(stats.get(sid), int) else 0) + len(got)
                 add(got)
         except SystemExit as e:  # 동네 이름 오류 등 설정 문제
-            problems.append(f"{label}: {e}")
-            print(f"  ⚠️ {label}: {e}")
+            stats[sid] = str(e)[:60]
+            print(f"  ⚠️ {sid}: {e}")
         except Exception as e:
-            problems.append(f"{label} 검색 실패")
-            print(f"  ⚠️ {label} 실패: {e}")
-    for label in {j[0] for j in jobs}:
-        if counts.get(label, 0) == 0 and not any(p.startswith(label) for p in problems):
-            problems.append(f"{label} 0건")
-    print("  사이트별 매물:", ", ".join(f"{k} {v}" for k, v in counts.items()) or "없음")
-    return items, problems
+            stats.setdefault(sid, "검색 실패")
+            print(f"  ⚠️ {sid} 실패: {e}")
+    if any(sd["kind"] == "daangn" for sd in w.get("site_defs") or []) and not w.get("regions"):
+        stats["daangn"] = "동네 미입력"
+    print("  사이트별 매물:", ", ".join(f"{k} {v}" for k, v in stats.items()) or "없음")
+    return items, stats
 
 def fetch_content(it):
     try:
@@ -340,7 +347,9 @@ def fetch_content(it):
             return fetch_detail(it["url"])
         if it["src"] == "번개장터":
             return bunjang_detail(it["id"].split(":", 1)[1])
-        return nextjs_detail(it["url"])
+        if it["src"] in ("중고나라", "N플리마켓"):
+            return nextjs_detail(it["url"])
+        return generic.detail(it["url"])
     except Exception as e:
         print("  상세 조회 실패:", it["src"], e)
         return ""
@@ -482,9 +491,11 @@ def run_project(cfg, p, ctx, now):
     evals = dict(st.get("evals") or {})
     seen = set(st.get("seen") or [])
     first_run = not st.get("initialized")
-    w = {"keywords": p["keywords"], "want": p["want"], "regions": p.get("regions") or []}
+    w = {"keywords": p["keywords"], "want": p["want"], "regions": p.get("regions") or [],
+         "site_defs": p.get("site_defs") or []}
 
-    items, problems = collect(cfg, w, ctx)
+    items, stats = collect(cfg, w, ctx)
+    problems = [f"{k}: {v}" for k, v in stats.items() if not isinstance(v, int)]
     ids = {i["id"] for i in items}
     exc = [norm(x) for x in (p.get("exclude") or []) + cfg.get("default_exclude", [])]
     lo, hi = p.get("min_price") or 1, p.get("max_price") or 10**12
@@ -523,13 +534,11 @@ def run_project(cfg, p, ctx, now):
                 evals[i["id"]] = res[i["id"]]
     ranked = ranked_now()
     print(f"  매물 {len(items)}개 → 1차 통과 {len(cand)}개 → AI 신규 평가 {len(new)}개 → 적합 {len(ranked)}개")
-    if ai_fail:
-        problems.append("AI 평가 일부 실패")
 
     if first_run and new and not any(i["id"] in evals for i in new):
         # 첫 회차인데 AI 평가 전부 실패 → 시작 처리하지 않고 다음 회차에 다시
         print("  ⚠️ AI 평가가 모두 실패해 첫 회차를 다음에 다시 시도합니다.")
-        return {"state": st, "top": None, "note": "첫 분석 재시도 대기 중(AI 오류)"}
+        return {"state": st, "top": None, "note": "첫 분석 재시도 대기 중(AI 오류)", "stats": stats}
 
     # 알림
     top_n, min_score = 3, p.get("min_score") or 65
@@ -572,8 +581,8 @@ def run_project(cfg, p, ctx, now):
                 evals.pop(k, None)
     state = {"initialized": True, "evals": evals, "seen": seen, "summary_sent": summary_sent,
              "best": ranked[0]["id"] if ranked else st.get("best")}
-    note = f"매물 {len(items)}개 확인 · 적합 {len(ranked)}개" + (" · ⚠️ " + ", ".join(problems) if problems else "")
-    return {"state": state, "top": top_for_web(ranked), "note": note}
+    note = f"매물 {len(items)}개 확인 · 적합 {len(ranked)}개" + (" · ⚠️ AI 평가 일부 실패" if ai_fail else "")
+    return {"state": state, "top": top_for_web(ranked), "note": note, "stats": stats}
 
 def run():
     with open("settings.yaml", encoding="utf-8") as f:
@@ -594,8 +603,9 @@ def run():
             r = run_project(cfg, p, ctx, now)
         except Exception as e:
             print("  ❌ 처리 실패:", e)
-            r = {"state": p.get("state") or {}, "top": None, "note": f"⚠️ 처리 오류: {str(e)[:80]}"}
-        sb_rpc("bot_save_project", p_project_id=p["id"], p_state=r["state"], p_top=r["top"], p_note=r["note"])
+            r = {"state": p.get("state") or {}, "top": None, "note": f"⚠️ 처리 오류: {str(e)[:80]}", "stats": None}
+        sb_rpc("bot_save_project", p_project_id=p["id"], p_state=r["state"], p_top=r["top"], p_note=r["note"],
+               p_site_stats=r.get("stats"))
 
 
 if __name__ == "__main__":
