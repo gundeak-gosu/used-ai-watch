@@ -327,7 +327,7 @@ def collect(cfg, w, ctx):
                 if ck not in ctx["cache"]:
                     ctx["cache"][ck] = fn(kw)
                     time.sleep(delay)
-                got = ctx["cache"][ck]
+                got = [dict(it, site=sid) for it in ctx["cache"][ck]]
                 stats[sid] = (stats[sid] if isinstance(stats.get(sid), int) else 0) + len(got)
                 add(got)
         except SystemExit as e:  # 동네 이름 오류 등 설정 문제
@@ -478,6 +478,33 @@ def sb_rpc(fn, **args):
 def norm(s):
     return re.sub(r"\s+", "", s or "").lower()
 
+def items_for_web(items, cand, evals, pw, exc, lo, hi):
+    """웹 '매물 목록' 화면용 — 모든 매물을 추천순(AI 점수)으로, 평가 전·제외된 것은 사유와 함께 뒤에."""
+    cand_ids = {i["id"] for i in cand}
+    out = []
+    for i in items:
+        e = {"id": i["id"], "site": i.get("site"), "src": i["src"], "title": i["title"][:90], "price": i["price"],
+             "url": i["url"], "thumb": i.get("thumb") or "", "region": i.get("region") or ""}
+        ev = evals.get(i["id"])
+        if i["id"] not in cand_ids:
+            if not lo <= i["price"] <= hi:
+                e["state"], e["why"] = "filtered", "가격 범위 밖"
+            elif str(i["status"] or "").upper() in ("CLOSED", "SOLD", "SOLD_OUT", "RESERVED"):
+                e["state"], e["why"] = "filtered", "판매완료·예약중"
+            else:
+                hit = next((x for x in exc if x in norm(i["title"] + i["content"])), "")
+                e["state"], e["why"] = "filtered", f"제외어 '{hit}'" if hit else "제외됨"
+        elif ev is None:
+            e["state"] = "pending"
+        else:
+            e.update({k: ev.get(k) for k in ("model", "specs", "summary", "cons", "fit", "value")})
+            e["score"] = round((1 - pw) * ev.get("fit", 0) + pw * ev.get("value", 0))
+            e["state"] = "fit" if ev.get("relevant") else "unrelated"
+        out.append(e)
+    order = {"fit": 0, "unrelated": 1, "pending": 2, "filtered": 3}
+    out.sort(key=lambda e: (order[e["state"]], -(e.get("score") or 0), e["price"]))
+    return out
+
 def top_for_web(ranked, n=5):
     keys = ("model", "specs", "summary", "cons", "fit", "value")
     return [{**{k: it["ev"].get(k) for k in keys}, "score": it["score"], "price": it["price"], "src": it["src"],
@@ -582,7 +609,8 @@ def run_project(cfg, p, ctx, now):
     state = {"initialized": True, "evals": evals, "seen": seen, "summary_sent": summary_sent,
              "best": ranked[0]["id"] if ranked else st.get("best")}
     note = f"매물 {len(items)}개 확인 · 적합 {len(ranked)}개" + (" · ⚠️ AI 평가 일부 실패" if ai_fail else "")
-    return {"state": state, "top": top_for_web(ranked), "note": note, "stats": stats}
+    return {"state": state, "top": top_for_web(ranked), "note": note, "stats": stats,
+            "items": items_for_web(items, cand, evals, pw, exc, lo, hi)}
 
 def run():
     with open("settings.yaml", encoding="utf-8") as f:
@@ -605,7 +633,7 @@ def run():
             print("  ❌ 처리 실패:", e)
             r = {"state": p.get("state") or {}, "top": None, "note": f"⚠️ 처리 오류: {str(e)[:80]}", "stats": None}
         sb_rpc("bot_save_project", p_project_id=p["id"], p_state=r["state"], p_top=r["top"], p_note=r["note"],
-               p_site_stats=r.get("stats"))
+               p_site_stats=r.get("stats"), p_items=r.get("items"))
 
 
 if __name__ == "__main__":

@@ -97,6 +97,23 @@
           border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
   @keyframes sp { to { transform: rotate(360deg); } }
   .msg.info { display: block; background: var(--bg); color: var(--muted); }
+  .chip.link { cursor: pointer; text-decoration: none; }
+  .chip.link:hover { border-color: var(--accent); color: var(--accent); }
+  a.more { color: var(--accent); font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; }
+  .lhead { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }
+  .lhead h2 { margin: 0; }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .filters button { background: var(--card); border: 1px solid var(--line); color: var(--muted); padding: 6px 12px;
+                    border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .filters button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .lbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  select { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+  .st { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+  .st.unrelated { background: var(--bg); color: var(--muted); }
+  .st.pending { background: #eef4ff; color: #3b6fd4; }
+  .st.filtered { background: var(--bg); color: var(--muted); }
+  @media (prefers-color-scheme: dark) { .st.pending { background: #16233d; color: #8fb0ff; } }
+  .item.dim { opacity: .55; }
   .hidden { display: none !important; }
   @media (max-width: 560px) { .row, .steps { grid-template-columns: 1fr; } h1 { font-size: 22px; } }
 </style>
@@ -202,6 +219,15 @@
 
     <div id="list"></div>
   </section>
+
+  <!-- 매물 목록 (사이트별 / 적합 / 전체) -->
+  <section id="listView" class="hidden">
+    <div class="lhead"><button class="btn-line" id="lvBack">← 프로젝트</button><h2 id="lvTitle"></h2></div>
+    <div class="filters" id="lvFilters"></div>
+    <div class="lbar"><span class="meta" id="lvInfo"></span>
+      <select id="lvSort"><option value="rec">추천순</option><option value="low">낮은 가격순</option><option value="high">높은 가격순</option></select></div>
+    <div class="card" style="padding:4px 16px"><div class="items" id="lvItems" style="border-top:0;margin-top:0"></div></div>
+  </section>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -258,9 +284,11 @@ sb.auth.onAuthStateChange((_ev, session) => render(session));
 
 function render(session) {
   $("authView").classList.toggle("hidden", !!session);
-  $("appView").classList.toggle("hidden", !session);
+  const inList = !!session && location.hash.startsWith("#list/");
+  $("appView").classList.toggle("hidden", !session || inList);
   $("who").classList.toggle("hidden", !session);
-  if (session) { $("whoEmail").textContent = session.user.email; load(); }
+  if (!session) $("listView").classList.add("hidden");
+  if (session) { $("whoEmail").textContent = session.user.email; load(); if (inList) route(); }
 }
 
 // ---------- 프로젝트 만들기 (① 찾는 물건 → ② 검색할 사이트 → 완료) ----------
@@ -399,7 +427,7 @@ async function load() {
   $("list").innerHTML = data.map(p => {
     const top = p.top || [];
     const status = p.last_run_at
-      ? `마지막 확인 ${ago(p.last_run_at)} · ${esc(p.status_note || "")}`
+      ? `마지막 확인 ${ago(p.last_run_at)} · ${esc(p.status_note || "")} · <a class="more" href="#list/${p.id}/fit">매물 목록 보기 →</a>`
       : "⏳ 첫 분석 대기 중 — 보통 30분~1시간 안에 결과 메일이 와요";
     const items = top.length ? `<div class="items">${top.map((it, i) => `
         <a class="item" href="${esc(it.url)}" target="_blank" rel="noopener">
@@ -422,7 +450,7 @@ async function load() {
           const v = (p.site_stats || {})[id];
           const tag = v === undefined ? "" : (typeof v === "number" ? ` ${v}` : " ⚠️");
           const tip = typeof v === "string" ? ` title="${esc(v)}"` : "";
-          return `<span class="chip gray"${tip}>🔎 ${esc(siteName(id))}${tag}</span>`; }).join("")}</div>
+          return `<a class="chip gray link"${tip} href="#list/${p.id}/${esc(id)}">🔎 ${esc(siteName(id))}${tag}</a>`; }).join("")}</div>
       <div class="note">${status}</div>
       ${items}
     </div>`;
@@ -434,6 +462,72 @@ async function load() {
     if (error) { alert(ko(error)); b.disabled = false; } else load();
   });
 }
+
+// ---------- 매물 목록 화면 (#list/<프로젝트id>/<fit|all|사이트id>) ----------
+const ITEMS = {};   // 프로젝트별 캐시
+let LV = { pid: null, filter: "fit" };
+const STATE_LABEL = { unrelated: "관련 없음", pending: "AI 평가 대기", filtered: "" };
+
+async function openList(pid, filter) {
+  LV = { pid, filter: filter || "fit" };
+  $("appView").classList.add("hidden"); $("listView").classList.remove("hidden");
+  window.scrollTo(0, 0);
+  if (!ITEMS[pid]) {
+    $("lvItems").innerHTML = `<div class="empty"><span class="spin"></span>불러오는 중…</div>`;
+    const [{ data: pr }, { data: it }] = await Promise.all([
+      sb.from("projects").select("id,name,sites,site_stats").eq("id", pid).maybeSingle(),
+      sb.from("project_items").select("items,updated_at").eq("project_id", pid).maybeSingle()]);
+    if (!pr) { $("lvItems").innerHTML = `<div class="empty">프로젝트를 찾을 수 없어요.</div>`; return; }
+    if (!SITES.length) { const r = await sb.from("sites").select("*"); SITES = r.data || []; }
+    ITEMS[pid] = { project: pr, items: (it && it.items) || [], updated: it && it.updated_at };
+  }
+  drawList();
+}
+function drawList() {
+  const { project, items, updated } = ITEMS[LV.pid];
+  const siteName = (id) => (SITES.find(s => s.id === id) || {}).name || id;
+  $("lvTitle").textContent = project.name;
+  const fitN = items.filter(i => i.state === "fit").length;
+  const tabs = [["fit", `적합 ${fitN}`], ["all", `전체 ${items.length}`]].concat(
+    (project.sites || []).map(id => [id, `${siteName(id)} ${items.filter(i => i.site === id).length}`]));
+  $("lvFilters").innerHTML = tabs.map(([k, label]) =>
+    `<button class="${k === LV.filter ? "on" : ""}" data-f="${esc(k)}">${esc(label)}</button>`).join("");
+  document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { location.hash = `#list/${LV.pid}/${b.dataset.f}`; });
+
+  let list = LV.filter === "fit" ? items.filter(i => i.state === "fit")
+           : LV.filter === "all" ? items.slice() : items.filter(i => i.site === LV.filter);
+  const sort = $("lvSort").value;
+  if (sort === "low") list.sort((a, b) => a.price - b.price);
+  else if (sort === "high") list.sort((a, b) => b.price - a.price);   // 추천순은 봇이 정렬해 둔 순서 그대로
+  $("lvInfo").textContent = !items.length ? "" :
+    `${list.length}개 · ${updated ? "목록 갱신 " + ago(updated) : ""}`;
+  if (!items.length) {
+    $("lvItems").innerHTML = `<div class="empty">아직 목록이 없어요. 다음 확인(30분마다) 때부터 여기에 보여요.</div>`; return;
+  }
+  if (!list.length) { $("lvItems").innerHTML = `<div class="empty">이 조건에 해당하는 매물이 없어요.</div>`; return; }
+  let rank = 0;
+  $("lvItems").innerHTML = list.map(it => {
+    const fit = it.state === "fit";
+    const label = it.state === "filtered" ? (it.why || "제외됨") : STATE_LABEL[it.state];
+    const head = fit && sort === "rec" ? `${++rank}위 · ` : "";
+    return `<a class="item ${fit ? "" : "dim"}" href="${esc(it.url)}" target="_blank" rel="noopener">
+      ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : `<div class="noimg"></div>`}
+      <div><div class="t">${head}${esc(it.model && fit ? it.model : it.title)} · ${won(it.price)}${label ? `<span class="st ${it.state}">${esc(label)}</span>` : ""}</div>
+        <div class="d">[${esc(siteName(it.site) || it.src)}] ${esc(fit ? (it.specs || "") : it.region || "")}${fit && it.model ? ` · ${esc(it.title)}` : ""}</div>
+        ${it.summary ? `<div class="d">👍 ${esc(it.summary)}${it.cons ? ` · ⚠️ ${esc(it.cons)}` : ""}</div>` : ""}</div>
+      <div class="score">${it.score ?? "–"}${it.score != null ? `<small>적합 ${it.fit} · 가치 ${it.value}</small>` : ""}</div>
+    </a>`;
+  }).join("");
+}
+$("lvSort").onchange = drawList;
+$("lvBack").onclick = () => { location.hash = ""; };
+function route() {
+  const m = location.hash.match(/^#list\/([0-9a-f-]+)\/(.+)$/);
+  if (m) return openList(m[1], decodeURIComponent(m[2]));
+  $("listView").classList.add("hidden");
+  sb.auth.getSession().then(({ data }) => { if (data.session) $("appView").classList.remove("hidden"); });
+}
+window.addEventListener("hashchange", route);
 
 sb.auth.getSession().then(({ data }) => render(data.session));
 </script>
