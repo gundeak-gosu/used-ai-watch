@@ -512,7 +512,7 @@ function drawList() {
     const head = fit && sort === "rec" ? `${++rank}위 · ` : "";
     return `<a class="item ${fit ? "" : "dim"}" href="${esc(it.url)}" target="_blank" rel="noopener">
       ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : `<div class="noimg"></div>`}
-      <div><div class="t">${head}${esc(it.model && fit ? it.model : it.title)} · ${won(it.price)}${label ? `<span class="st ${it.state}">${esc(label)}</span>` : ""}</div>
+      <div><div class="t">${head}${esc(it.model && fit ? it.model : it.title)} · ${won(it.price)}${label ? `<span class="st ${it.state}">${esc(label)}</span>` : ""}${it.kept ? `<span class="st filtered" title="이번 확인 때 검색 결과에 없었어요. 사이트 일시 오류이거나 판매완료일 수 있어요(3일 지나면 목록에서 빠짐).">최근 확인 안 됨</span>` : ""}</div>
         <div class="d">[${esc(siteName(it.site) || it.src)}] ${esc(fit ? (it.specs || "") : it.region || "")}${fit && it.model ? ` · ${esc(it.title)}` : ""}</div>
         ${it.summary ? `<div class="d">👍 ${esc(it.summary)}${it.cons ? ` · ⚠️ ${esc(it.cons)}` : ""}</div>` : ""}</div>
       <div class="score">${it.score ?? "–"}${it.score != null ? `<small>적합 ${it.fit} · 가치 ${it.value}</small>` : ""}</div>

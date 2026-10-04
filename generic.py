@@ -122,6 +122,18 @@ def _card_items(soup, base):
     return uniq
 
 
+ID_PARAM = re.compile(r"(^|_)(no|id|pid|uid|idx|seq|num|code|goods|item|product|branduid|it_id)$", re.I)
+TRACK_PARAM = re.compile(r"^(_|utm|ref|gclid|fbclid|sid$|session|pos$|ss$|sort|page|cate|cat_no|keyword|q$|search)", re.I)
+
+def stable_url(url):
+    """같은 매물인지 판단할 주소 — 검색할 때마다 바뀌는 꼬리표(_sid, _pos, utm 등)는 떼고 상품번호류만 남김."""
+    u = urllib.parse.urlsplit(url)
+    keep = sorted((k, v) for k, v in urllib.parse.parse_qsl(u.query)
+                  if ID_PARAM.search(k) and not TRACK_PARAM.match(k))
+    return urllib.parse.urlunsplit((u.scheme, u.netloc.lower().removeprefix("www."), u.path.rstrip("/"),
+                                    urllib.parse.urlencode(keep), ""))
+
+
 def search(site_id, site_name, search_url, keyword):
     """search_url 안의 {q}를 키워드로 바꿔 검색. {q}가 없으면 그 목록 페이지를 읽고 제목에 키워드가 든 것만."""
     has_q = "{q}" in search_url
@@ -134,7 +146,7 @@ def search(site_id, site_name, search_url, keyword):
         items = [i for i in items if all(w in i["title"].lower().replace(" ", "") or w in i["title"].lower() for w in words)]
     out = []
     for i in items[:60]:
-        h = hashlib.md5(i["url"].encode()).hexdigest()[:12]
+        h = hashlib.md5(stable_url(i["url"]).encode()).hexdigest()[:12]
         out.append({"id": f"{site_id}:{h}", "src": site_name, "title": i["title"], "content": i.get("content") or "",
                     "price": i["price"], "region": "택배/방문", "status": None, "url": i["url"], "thumb": i["thumb"]})
     return out

@@ -111,11 +111,19 @@ Deno.serve(async (req) => {
   let recs: any[] = [];
   try { recs = JSON.parse(m ? m[1] : "[]"); } catch { recs = []; }
 
+  // 이미 등록된 사이트와 같은 도메인이면 새로 만들지 않고 기존 것을 씀(예: LabX 중복 방지)
+  const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } };
+  const { data: known } = await admin.from("sites").select("*").is("created_by", null);
   const out = [];
   for (const r of recs.slice(0, 6)) {
     const search_url = String(r.search_url || "");
     if (!/^https?:\/\//i.test(search_url) || !search_url.includes("{q}")) continue;
     if (GENERAL.some((d) => search_url.includes(d))) continue;
+    const same = (known || []).find((k: any) => k.search_url && host(k.search_url) === host(search_url));
+    if (same) {
+      if (!out.some((o: any) => o.id === same.id)) out.push({ ...same, check: "이미 등록된 사이트" });
+      continue;
+    }
     const id = slug(r.home_url || search_url);
     if (!id) continue;
     const p = await probe(search_url, keywords[0]);

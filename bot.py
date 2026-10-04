@@ -485,6 +485,8 @@ def items_for_web(items, cand, evals, pw, exc, lo, hi):
     for i in items:
         e = {"id": i["id"], "site": i.get("site"), "src": i["src"], "title": i["title"][:90], "price": i["price"],
              "url": i["url"], "thumb": i.get("thumb") or "", "region": i.get("region") or ""}
+        if i.get("kept"):
+            e["kept"] = True
         ev = evals.get(i["id"])
         if i["id"] not in cand_ids:
             if not lo <= i["price"] <= hi:
@@ -522,8 +524,40 @@ def run_project(cfg, p, ctx, now):
          "site_defs": p.get("site_defs") or []}
 
     items, stats = collect(cfg, w, ctx)
-    problems = [f"{k}: {v}" for k, v in stats.items() if not isinstance(v, int)]
-    ids = {i["id"] for i in items}
+    ids = {i["id"] for i in items}  # 이번 회차에 실제로 본 매물
+
+    # 누적: 한 번 찾은 매물은 기억해 두고, 이번에 안 보여도(사이트 일시 차단·검색결과 밀림) 며칠은 계속 비교에 포함
+    keep_sec = cfg.get("keep_days", 3) * 86400
+    t = int(time.time())
+    catalog = dict(st.get("catalog") or {})
+    for i in items:
+        old = catalog.get(i["id"]) or {}
+        catalog[i["id"]] = {k: i.get(k) for k in ("site", "src", "title", "price", "url", "thumb", "region", "status")}
+        catalog[i["id"]].update(first=old.get("first", t), last=t)
+    kept = []
+    for cid, c in list(catalog.items()):
+        if cid in ids:
+            continue
+        if t - c.get("last", 0) > keep_sec:
+            catalog.pop(cid)  # 오래 안 보이면(판매완료·삭제 추정) 정리
+            continue
+        kept.append(dict(c, id=cid, content="", kept=True))
+    if len(catalog) > 1500:
+        for cid in sorted(catalog, key=lambda k: catalog[k].get("last", 0))[: len(catalog) - 1500]:
+            catalog.pop(cid)
+    now_counts = {k: v for k, v in stats.items() if isinstance(v, int)}
+    items = items + kept
+    # 사이트 칩에는 '지금 비교 중인 매물 수'(이번에 본 것 + 유지 중인 것)를 보여줌
+    for sid in stats:
+        n_all = sum(1 for i in items if i.get("site") == sid)
+        if isinstance(stats[sid], int) or n_all:
+            stats[sid] = n_all
+    problems = []
+    for sid, v in now_counts.items():
+        n_kept = sum(1 for i in kept if i.get("site") == sid)
+        if v == 0 and n_kept:
+            sname = next((d["name"] for d in w["site_defs"] if d["id"] == sid), sid)
+            problems.append(f"{sname} 이번 확인 0건(이전 결과 {n_kept}개 유지)")
     exc = [norm(x) for x in (p.get("exclude") or []) + cfg.get("default_exclude", [])]
     lo, hi = p.get("min_price") or 1, p.get("max_price") or 10**12
     cand = [i for i in items
@@ -565,7 +599,7 @@ def run_project(cfg, p, ctx, now):
     if first_run and new and not any(i["id"] in evals for i in new):
         # 첫 회차인데 AI 평가 전부 실패 → 시작 처리하지 않고 다음 회차에 다시
         print("  ⚠️ AI 평가가 모두 실패해 첫 회차를 다음에 다시 시도합니다.")
-        return {"state": st, "top": None, "note": "첫 분석 재시도 대기 중(AI 오류)", "stats": stats}
+        return {"state": dict(st, catalog=catalog), "top": None, "note": "첫 분석 재시도 대기 중(AI 오류)", "stats": stats}
 
     # 알림
     top_n, min_score = 3, p.get("min_score") or 65
@@ -602,13 +636,14 @@ def run_project(cfg, p, ctx, now):
     pending = set() if first_run else {i["id"] for i in cand if i["id"] not in evals}
     seen = list(seen | (ids - pending))[-1500:]
     if len(evals) > 600:  # 오래된 평가 정리
-        keep = {i["id"] for i in cand}
+        keep = {i["id"] for i in cand} | set(catalog)
         for k in list(evals)[: len(evals) - 600]:
             if k not in keep:
                 evals.pop(k, None)
     state = {"initialized": True, "evals": evals, "seen": seen, "summary_sent": summary_sent,
-             "best": ranked[0]["id"] if ranked else st.get("best")}
-    note = f"매물 {len(items)}개 확인 · 적합 {len(ranked)}개" + (" · ⚠️ AI 평가 일부 실패" if ai_fail else "")
+             "best": ranked[0]["id"] if ranked else st.get("best"), "catalog": catalog}
+    note = (f"매물 {len(items)}개 비교 중(이번 확인 {len(ids)}개) · 적합 {len(ranked)}개"
+            + (" · ⚠️ AI 평가 일부 실패" if ai_fail else "") + "".join(f" · ⚠️ {x}" for x in problems))
     return {"state": state, "top": top_for_web(ranked), "note": note, "stats": stats,
             "items": items_for_web(items, cand, evals, pw, exc, lo, hi)}
 
